@@ -10,47 +10,27 @@ Pipeline ETL harian data transaksi Transjakarta menggunakan Apache Airflow, Post
 [Source Layer]
   CSV   : dummy_routes.csv, dummy_realisasi_bus.csv, dummy_shelter_corridor.
   PgSQL : dummy_transaksi_bus, dummy_transaksi_halte     
-        | EXTRACT - Python/Pandas
-          (source heterogen CSV+PgSQL, satu-satunya alasan Python dipakai di sini)
 
-[Bronze / L0] stg_transaksi_raw    <- raw union bus+halte, append-only, idempotent per run_id
-[Staging Ref] ref_routes              <- lookup rute (route_code bisa numeric ATAU alfanumerik, mis. 'D11')
-              ref_shelter_corridor     <- lookup shelter -> corridor_code (numeric)
-              stg_realisasi_bus        <- mapping bus body -> rute realisasi (dengan standardisasi)
+[Bronze / L0] stg_transaksi_raw    
+[Staging Ref] ref_routes              
+              ref_shelter_corridor     
+              stg_realisasi_bus        
 
-        | TRANSFORM SILVER - PostgresOperator -> SQL Pushdown ke PostgreSQL
-          sql/03_transform_silver.sql
-          - DISTINCT ON (uuid) untuk dedup
-          - (status_var = 'S') AS is_pelanggan
-          - INSERT ... ON CONFLICT DO UPDATE
+        | TRANSFORM SILVER 
 
 [Silver / L1] stg_transaksi_clean  
 
-        | TRANSFORM GOLD - PostgresOperator -> SQL Pushdown ke PostgreSQL
-          sql/04_transform_gold.sql
-          - cube_by_route: BUS via stg_realisasi_bus + ref_routes,
-            HALTE via ref_shelter_corridor + ref_routes, di-UNION ALL
-          - GROUP BY + COUNT + SUM
-          - INSERT ... ON CONFLICT DO UPDATE
+        | TRANSFORM GOLD -
 
 [Gold / L2]
   cube_by_card_type  -> tanggal, card_type_var, gate_in_boo
   cube_by_route      -> tanggal, route_code, route_name, gate_in_boo (BUS + HALTE)
   cube_by_tarif      -> tanggal, fare_int, gate_in_boo
 
-        | LOAD - Python 
-
   data/output/output_by_card_type.csv
   data/output/output_by_route.csv
   data/output/output_by_tarif.csv
 ```
-
-**Design pattern:** Factory Pattern (OOP) via `ETLPipelineFactory`
-**Pendekatan:** ELT - SQL Pushdown. Airflow = orchestrator saja, PostgreSQL yang kerja keras
-**Kenapa ELT bukan ETL:** Kalau data jutaan baris, Pandas in-memory -> OOM. SQL pushdown scale tanpa batas RAM Airflow
-**Tracking sesi:** `etl_run_id` (Airflow run_id) di setiap layer
-**Task grouping di DAG:** `extract` -> `transform` (sub-task: `silver`, `gold`) -> `load` (sub-task: `export_csv`)
----
 
 ## Struktur Folder
 
